@@ -1,0 +1,58 @@
+name:                spotify-random-album
+version:             0.1.0.0
+github:              "githubuser/spotify-random-album"
+license:             BSD3
+author:              "Author name here"
+maintainer:          "example@example.com"
+copyright:           "2019 Author name here"
+
+extra-source-files:
+- README.md
+- ChangeLog.md
+
+description:         Please see the README on GitHub at <https://github.com/githubuser/spotify-random-album#readme>
+
+dependencies:
+- base >= 4.7 && < 5
+
+library:
+  source-dirs: src
+  dependencies:
+    - lens
+    - scotty
+    - http-client
+    - http-types
+    - random
+    - http-conduit
+    - text
+    - aeson
+    - base64-bytestring
+    - bytestring
+    - lens-aeson
+    - MonadRandom
+    - wai-session
+    - vault
+    - cookie
+    - wai
+
+executables:
+  spotify-random-album:
+    main:                Main.hs
+    source-dirs:         app
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - spotify-random-album
+
+tests:
+  spotify-random-album-test:
+    main:                Spec.hs
+    source-dirs:         test
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - spotify-random-album

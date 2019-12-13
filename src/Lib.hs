@@ -1,11 +1,13 @@
-#! /usr/bin/env stack
--- stack script --resolver lts-14.16 --package lens --package scotty --package http-client --package http-types --package random --package http-conduit --package text --package aeson --package base64-bytestring --package bytestring --package lens-aeson --package MonadRandom
-
 {-# LANGUAGE DeriveGeneric       #-}
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE RecordWildCards     #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications    #-}
+module Lib
+  ( appMain
+  )
+where
+
 import           Control.Lens
 import           Control.Monad
 import           Control.Monad.IO.Class
@@ -18,96 +20,146 @@ import qualified Data.ByteString.Char8      as S8
 import qualified Data.ByteString.Lazy.Char8 as LBS
 import qualified Data.Text                  as T
 import qualified Data.Text.Lazy             as TL
+import           Data.Vault.Lazy            as Vault
 import           GHC.Generics
 import           Network.HTTP.Simple
 import           Network.HTTP.Types
+import           Network.Wai                (vault)
+import           Network.Wai.Session
+import           Network.Wai.Session.Map
 import           System.Environment
 import           System.Random
+import           Web.Cookie                 (defaultSetCookie)
 import           Web.Scotty
 import qualified Web.Scotty                 as Scotty
 
 stateKey = "spotify_auth_state"
+accessTokenKey = "access_token"
+refreshTokenKey = "refresh_token"
+sessionKey = "session"
 redirectUri = "http://localhost:8888/callback"
 
-main :: IO ()
-main = do
-    clientId <- getEnv "SPOTIFY_CLIENT_ID"
-    clientSecret <- getEnv "SPOTIFY_CLIENT_SECRET"
+appMain :: IO ()
+appMain = do
+  clientId     <- getEnv "SPOTIFY_CLIENT_ID"
+  clientSecret <- getEnv "SPOTIFY_CLIENT_SECRET"
+  session      <- Vault.newKey
+  store        <- mapStore_ @String
 
-    let
-      token = Base64.encode (S8.pack clientId <> ":" <> S8.pack clientSecret)
+  let token = Base64.encode (S8.pack clientId <> ":" <> S8.pack clientSecret)
       authorization = "Basic " <> token
+      sessionMiddleware = withSession store sessionKey defaultSetCookie session
 
-    scotty 8888 $ do
-      Scotty.get "/" $ do
-        Scotty.html randomizeForm
+  scotty 8888 $ do
+    Scotty.middleware sessionMiddleware
 
-      Scotty.get "/randomize" $ do
-        state <- liftIO $ fmap S8.pack $ replicateM 16 $ randomRIO ('a', 'z')
-        -- setCookie stateKey state
+    Scotty.get "/" $ do
+      Scotty.html randomizeForm
 
-        let url = TL.pack $ S8.unpack $ ("https://accounts.spotify.com/authorize?" <>) $
-               mconcat
-              [ "response_type=code"
-              , "&client_id=" <> S8.pack clientId
-              , "&scope=user-read-private user-read-email user-read-playback-state user-modify-playback-state user-library-read"
-              , "&redirect_uri=http://localhost:8888/callback"
-              , "&state=" <> state
-              ]
-        redirect url
+    Scotty.get "/login" $ do
+      state    <- liftIO $ fmap S8.pack $ replicateM 16 $ randomRIO ('a', 'z')
 
-      Scotty.get "/callback" $ do
-        code <- param "code"
+      -- TODO abstract
+      request0 <- request
+      let Just (sessionLookup, sessionInsert) =
+            Vault.lookup session (vault request0)
 
-        -- _mState <- param "state"
-        -- NB. this is important in prod but who cares here
-        -- mStoredState <- (readCookie stateKey) =<< getCookies
-        -- when mState != mStoredState $
-          -- error "Mismatched state"
-        -- clearCookie stateKey
+      -- Store state in a cookie
+      sessionInsert stateKey state
 
-        request0 <- parseRequest "POST https://accounts.spotify.com/api/token"
+      let
+        url =
+          TL.pack
+            $ S8.unpack
+            $ ("https://accounts.spotify.com/authorize?" <>)
+            $ mconcat
+                [ "response_type=code"
+                , "&client_id=" <> S8.pack clientId
+                , "&scope=user-read-private user-read-email user-read-playback-state user-modify-playback-state user-library-read"
+                , "&redirect_uri=http://localhost:8888/callback"
+                , "&state=" <> state
+                ]
+      redirect url
 
-        let
-          request
-            = setRequestBodyURLEncoded
-              [ ("grant_type", "authorization_code")
-              , ("code", code)
-              , ("redirect_uri", redirectUri)
-              ]
-            $ setRequestHeader "Authorization" [authorization] request0
+    Scotty.get "/callback" $ do
+      code     <- param "code"
 
-        tokenResponse <- httpJSON request
+      request0 <- request
+      let Just (sessionLookup, sessionInsert) =
+            Vault.lookup session (vault request0)
 
-        -- TODO: Store tokens somewhere?
-        let
-          tokenResponseValue = getResponseBody @Value tokenResponse
-          Just accessToken = tokenResponseValue ^? key "access_token" . _String
-          Just refreshToken = tokenResponseValue ^? key "refresh_token" . _String
+      -- Store state in a cookie
+      state                               <- param "state"
+      mStoredState :: Maybe S8.ByteString <- sessionLookup stateKey
+      when (Just state /= mStoredState) $ error "mismatched state"
+      -- TODO session clear
+      -- sessionInsert stateKey Nothing
 
-        -- res <- liftIO $ callSpotifyWith accessToken "GET https://api.spotify.com/v1/me" id
-        -- TODO: Choose a Device?
-        -- res :: SpotifyDevices <- liftIO
-          -- $ callSpotifyWith accessToken "GET https://api.spotify.com/v1/me/player/devices" id
-        albums <- liftIO $ getMyAlbums accessToken
-        randomAlbum <- liftIO $ uniform albums
+      request0 <- parseRequest "POST https://accounts.spotify.com/api/token"
 
-        let
-          tracks = map spotifyTrackUri $ spotifyTracksItems . spotifyAlbumTracks . spotifyAlbumItemAlbum $ randomAlbum
-        liftIO $ callSpotifyWithNoResponse accessToken "PUT https://api.spotify.com/v1/me/player/play"
-          $ setRequestBodyJSON (object ["uris" Aeson..= tracks])
+      let request =
+            setRequestBodyURLEncoded
+                [ ("grant_type"  , "authorization_code")
+                , ("code"        , code)
+                , ("redirect_uri", redirectUri)
+                ]
+              $ setRequestHeader "Authorization" [authorization] request0
 
-        Scotty.html $ TL.unlines
-          [ "<h1>Playing album: " <> TL.pack (spotifyAlbumName $ spotifyAlbumItemAlbum randomAlbum) <> "</h1>"
-          , randomizeForm
-          ]
+      tokenResponse <- httpJSON request
 
-randomizeForm = "<form action=\"/randomize\"><button>Randomize Album</button><form>"
+      -- TODO: Store tokens somewhere?
+      let
+        tokenResponseValue = getResponseBody @Value tokenResponse
+        Just accessToken   = tokenResponseValue ^? key "access_token" . _String
+        Just refreshToken  = tokenResponseValue ^? key "refresh_token" . _String
+
+      sessionInsert accessTokenKey  (S8.pack $ T.unpack accessToken)
+      sessionInsert refreshTokenKey (S8.pack $ T.unpack refreshToken)
+
+      Scotty.html randomizeForm
+
+      -- res <- liftIO $ callSpotifyWith accessToken "GET https://api.spotify.com/v1/me" id
+      -- TODO: Choose a Device?
+      -- res :: SpotifyDevices <- liftIO
+        -- $ callSpotifyWith accessToken "GET https://api.spotify.com/v1/me/player/devices" id
+
+    Scotty.get "/randomize" $ do
+      request0 <- request
+      let Just (sessionLookup, sessionInsert) =
+            Vault.lookup session (vault request0)
+
+      Just accessTokenBS <- sessionLookup accessTokenKey
+      let accessToken = T.pack $ S8.unpack accessTokenBS
+
+      albums      <- liftIO $ getMyAlbums accessToken
+      randomAlbum <- liftIO $ uniform albums
+
+      let tracks =
+            map spotifyTrackUri
+              $ spotifyTracksItems
+              . spotifyAlbumTracks
+              . spotifyAlbumItemAlbum
+              $ randomAlbum
+      liftIO
+        $ callSpotifyWithNoResponse
+            accessToken
+            "PUT https://api.spotify.com/v1/me/player/play"
+        $ setRequestBodyJSON (object ["uris" Aeson..= tracks])
+
+      Scotty.html $ TL.unlines
+        [ "<h1>Playing album: "
+        <> TL.pack (spotifyAlbumName $ spotifyAlbumItemAlbum randomAlbum)
+        <> "</h1>"
+        , randomizeForm
+        ]
+
+randomizeForm =
+  "<form action=\"/randomize\"><button>Randomize Album</button><form>"
 
 getMyAlbums accessToken = go [] "https://api.spotify.com/v1/me/albums?limit=50"
  where
   go albums url = do
-    SpotifyAlbumsResponse{..} <- callSpotifyWith accessToken ("GET " <> url) id
+    SpotifyAlbumsResponse {..} <- callSpotifyWith accessToken ("GET " <> url) id
     case spotifyAlbumsResponseNext of
       Nothing   -> pure albums
       Just next -> do
@@ -141,7 +193,9 @@ instance ToJSON SpotifyDevice where
   toJSON = genericToJSON (unPrefix "spotifyDevice")
   toEncoding = genericToEncoding (unPrefix "spotifyDevice")
 
-unPrefix str = defaultOptions { fieldLabelModifier = camelTo2 '_' . drop (length (str :: String)) }
+unPrefix str = defaultOptions
+  { fieldLabelModifier = camelTo2 '_' . drop (length (str :: String))
+  }
 
 data SpotifyAlbumsResponse = SpotifyAlbumsResponse
   { spotifyAlbumsResponseItems :: [SpotifyAlbumItem]
@@ -288,34 +342,40 @@ instance FromJSON SpotifyTrack where
   -- "total" : 19
 -- }
 
-callSpotifyWith :: forall a. (FromJSON a, Show a) => T.Text ->  String -> (Request -> Request) -> IO a
+callSpotifyWith
+  :: forall a
+   . (FromJSON a, Show a)
+  => T.Text
+  -> String
+  -> (Request -> Request)
+  -> IO a
 callSpotifyWith accessToken request f = do
   request0 <- parseRequest request
 
-  let
-    spotifyAuthorization = "Bearer " <> S8.pack (T.unpack accessToken)
-    request
-      = setRequestHeader "Authorization" [spotifyAuthorization]
-      $ setRequestHeader "Content-Type" ["application/json"]
-      $ f request0
+  let spotifyAuthorization = "Bearer " <> S8.pack (T.unpack accessToken)
+      request =
+        setRequestHeader "Authorization" [spotifyAuthorization]
+          $ setRequestHeader "Content-Type" ["application/json"]
+          $ f request0
 
   response <- httpJSON request
   pure $ getResponseBody @a response
 
-callSpotifyWithNoResponse :: T.Text ->  String -> (Request -> Request) -> IO ()
+callSpotifyWithNoResponse :: T.Text -> String -> (Request -> Request) -> IO ()
 callSpotifyWithNoResponse accessToken request f = do
   request0 <- parseRequest request
 
-  let
-    spotifyAuthorization = "Bearer " <> S8.pack (T.unpack accessToken)
-    request
-      = setRequestHeader "Authorization" [spotifyAuthorization]
-      $ setRequestHeader "Content-Type" ["application/json"]
-      $ f request0
+  let spotifyAuthorization = "Bearer " <> S8.pack (T.unpack accessToken)
+      request =
+        setRequestHeader "Authorization" [spotifyAuthorization]
+          $ setRequestHeader "Content-Type" ["application/json"]
+          $ f request0
 
   response <- httpNoBody request
-  if getResponseStatusCode response == 204 then pure () else do
-    response1 <- httpJSON request
-    print (getResponseBody response1 :: Value)
-    error (show response1)
+  if getResponseStatusCode response == 204
+    then pure ()
+    else do
+      response1 <- httpJSON request
+      print (getResponseBody response1 :: Value)
+      error (show response1)
 
