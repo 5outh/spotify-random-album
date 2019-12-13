@@ -57,15 +57,10 @@ appMain = do
       Scotty.html randomizeForm
 
     Scotty.get "/login" $ do
-      state    <- liftIO $ fmap S8.pack $ replicateM 16 $ randomRIO ('a', 'z')
-
-      -- TODO abstract
-      request0 <- request
-      let Just (sessionLookup, sessionInsert) =
-            Vault.lookup session (vault request0)
+      state <- liftIO $ fmap S8.pack $ replicateM 16 $ randomRIO ('a', 'z')
 
       -- Store state in a cookie
-      sessionInsert stateKey state
+      sessionInsert session stateKey state
 
       let
         url =
@@ -82,15 +77,11 @@ appMain = do
       redirect url
 
     Scotty.get "/callback" $ do
-      code     <- param "code"
-
-      request0 <- request
-      let Just (sessionLookup, sessionInsert) =
-            Vault.lookup session (vault request0)
+      code  <- param "code"
 
       -- Store state in a cookie
-      state                               <- param "state"
-      mStoredState :: Maybe S8.ByteString <- sessionLookup stateKey
+      state <- param "state"
+      mStoredState :: Maybe S8.ByteString <- sessionLookup session stateKey
       when (Just state /= mStoredState) $ error "mismatched state"
       -- TODO session clear
       -- sessionInsert stateKey Nothing
@@ -113,8 +104,8 @@ appMain = do
         Just accessToken   = tokenResponseValue ^? key "access_token" . _String
         Just refreshToken  = tokenResponseValue ^? key "refresh_token" . _String
 
-      sessionInsert accessTokenKey  (S8.pack $ T.unpack accessToken)
-      sessionInsert refreshTokenKey (S8.pack $ T.unpack refreshToken)
+      sessionInsert session accessTokenKey  (S8.pack $ T.unpack accessToken)
+      sessionInsert session refreshTokenKey (S8.pack $ T.unpack refreshToken)
 
       Scotty.html randomizeForm
 
@@ -124,11 +115,7 @@ appMain = do
         -- $ callSpotifyWith accessToken "GET https://api.spotify.com/v1/me/player/devices" id
 
     Scotty.get "/randomize" $ do
-      request0 <- request
-      let Just (sessionLookup, sessionInsert) =
-            Vault.lookup session (vault request0)
-
-      Just accessTokenBS <- sessionLookup accessTokenKey
+      Just accessTokenBS <- sessionLookup session accessTokenKey
       let accessToken = T.pack $ S8.unpack accessTokenBS
 
       albums      <- liftIO $ getMyAlbums accessToken
@@ -379,3 +366,14 @@ callSpotifyWithNoResponse accessToken request f = do
       print (getResponseBody response1 :: Value)
       error (show response1)
 
+sessionInsert session0 key val = do
+  request0 <- request
+  let Just (_sessionLookup, sessionInsert0) =
+        Vault.lookup session0 (vault request0)
+  sessionInsert0 key val
+
+sessionLookup session0 key = do
+  request0 <- request
+  let Just (sessionLookup0, _sessionInsert) =
+        Vault.lookup session0 (vault request0)
+  sessionLookup0 key
