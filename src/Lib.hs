@@ -52,7 +52,7 @@ appMain :: IO ()
 appMain = do
   clientId     <- getEnv "SPOTIFY_CLIENT_ID"
   clientSecret <- getEnv "SPOTIFY_CLIENT_SECRET"
-  port         <- getEnv "PORT"
+  port         <- read <$> getEnv "PORT"
   redirectUri  <- S8.pack <$> getEnv "REDIRECT_URI"
   session      <- Vault.newKey
   store        <- mapStore_ @String
@@ -61,7 +61,7 @@ appMain = do
       authorization = "Basic " <> token
       sessionMiddleware = withSession store sessionKey defaultSetCookie session
 
-  scotty 8888 $ do
+  scotty port $ do
     Scotty.middleware sessionMiddleware
 
     Scotty.get "/" $ do
