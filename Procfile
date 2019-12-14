@@ -1,0 +1,1 @@
+web: spotify-random-album

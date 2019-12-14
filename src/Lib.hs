@@ -42,16 +42,18 @@ import           Web.Cookie                    (defaultSetCookie)
 import           Web.Scotty
 import qualified Web.Scotty                    as Scotty
 
+-- Session keys
 stateKey = "spotify_auth_state"
 accessTokenKey = "access_token"
 refreshTokenKey = "refresh_token"
 sessionKey = "session"
-redirectUri = "http://localhost:8888/callback"
 
 appMain :: IO ()
 appMain = do
   clientId     <- getEnv "SPOTIFY_CLIENT_ID"
   clientSecret <- getEnv "SPOTIFY_CLIENT_SECRET"
+  port         <- getEnv "PORT"
+  redirectUri  <- S8.pack <$> getEnv "REDIRECT_URI"
   session      <- Vault.newKey
   store        <- mapStore_ @String
 
