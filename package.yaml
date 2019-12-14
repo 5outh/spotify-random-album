@@ -34,6 +34,7 @@ library:
     - vault
     - cookie
     - wai
+    - blaze-html
 
 executables:
   spotify-random-album:

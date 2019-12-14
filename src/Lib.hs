@@ -113,22 +113,7 @@ appMain = do
       sessionInsert session accessTokenKey  (S8.pack $ T.unpack accessToken)
       sessionInsert session refreshTokenKey (S8.pack $ T.unpack refreshToken)
 
-      SpotifyDevices {..} <- liftIO $ callSpotifyWith
-        accessToken
-        "GET https://api.spotify.com/v1/me/player/devices"
-        id
-
-      let
-        deviceForm =
-          (Blaze.form ! Blaze.action "/randomize" ! Blaze.method "POST") $ do
-            (Blaze.label ! Blaze.for "device_id") "Choose a Device"
-            Blaze.select ! Blaze.id "device_id" ! Blaze.name "device_id" $ do
-              for_ spotifyDevicesDevices
-                $ \SpotifyDevice {..} ->
-                    (Blaze.option ! Blaze.value (fromString spotifyDeviceId))
-                      (toHtml spotifyDeviceName)
-            Blaze.button "Randomize Album"
-
+      deviceForm <- getDeviceForm accessToken
       Scotty.html $ Blaze.renderHtml deviceForm
 
     Scotty.post "/randomize" $ do
@@ -152,12 +137,13 @@ appMain = do
         $ setRequestBodyJSON (object ["uris" Aeson..= tracks])
         . setRequestQueryString [("device_id", Just deviceId)]
 
-      Scotty.html $ TL.unlines
-        [ "<h1>Playing album: "
-        <> TL.pack (spotifyAlbumName $ spotifyAlbumItemAlbum randomAlbum)
-        <> "</h1>"
-        , randomizeForm
-        ]
+      deviceForm <- getDeviceForm accessToken
+      Scotty.html $ Blaze.renderHtml $ do
+        Blaze.h1
+          (fromString $ "Playing album: " <> spotifyAlbumName
+            (spotifyAlbumItemAlbum randomAlbum)
+          )
+        deviceForm
 
 randomizeForm =
   "<form action=\"/randomize\"><button>Randomize Album</button><form>"
@@ -395,3 +381,18 @@ sessionLookup session0 key = do
   let Just (sessionLookup0, _sessionInsert) =
         Vault.lookup session0 (vault request0)
   sessionLookup0 key
+
+getDeviceForm accessToken = do
+  SpotifyDevices {..} <- liftIO $ callSpotifyWith
+    accessToken
+    "GET https://api.spotify.com/v1/me/player/devices"
+    id
+
+  pure $ (Blaze.form ! Blaze.action "/randomize" ! Blaze.method "POST") $ do
+    (Blaze.label ! Blaze.for "device_id") "Choose a Device"
+    Blaze.select ! Blaze.id "device_id" ! Blaze.name "device_id" $ do
+      for_ spotifyDevicesDevices
+        $ \SpotifyDevice {..} ->
+            (Blaze.option ! Blaze.value (fromString spotifyDeviceId))
+              (toHtml spotifyDeviceName)
+    Blaze.button "Randomize Album"
