@@ -13,7 +13,10 @@ extra-source-files:
 description:         Please see the README on GitHub at <https://github.com/githubuser/spotify-random-album#readme>
 
 dependencies:
-- base >= 4.7 && < 5
+ - base >= 4.7 && < 5
+
+default-extensions:
+  - DeriveGeneric
 
 library:
   source-dirs: src

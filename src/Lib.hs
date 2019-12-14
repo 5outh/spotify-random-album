@@ -1,6 +1,4 @@
-{-# LANGUAGE DeriveGeneric       #-}
 {-# LANGUAGE OverloadedStrings   #-}
-{-# LANGUAGE RankNTypes          #-}
 {-# LANGUAGE RecordWildCards     #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications    #-}
@@ -38,6 +36,7 @@ import qualified Text.Blaze.Html.Renderer.Text as Blaze
 import           Text.Blaze.Html5              (toHtml, (!))
 import qualified Text.Blaze.Html5              as Blaze
 import qualified Text.Blaze.Html5.Attributes   as Blaze hiding (form, label)
+import           Types.Spotify
 import           Web.Cookie                    (defaultSetCookie)
 import           Web.Scotty
 import qualified Web.Scotty                    as Scotty
@@ -188,117 +187,11 @@ getMyAlbums accessToken = go [] "https://api.spotify.com/v1/me/albums?limit=50"
         print next
         (spotifyAlbumsResponseItems ++) <$> go albums next
 
-data SpotifyDevices = SpotifyDevices
-  { spotifyDevicesDevices       :: [SpotifyDevice]
-  } deriving (Show, Generic)
-
-instance FromJSON SpotifyDevices where
-  parseJSON = genericParseJSON (unPrefix "spotifyDevices")
-instance ToJSON SpotifyDevices where
-  toJSON = genericToJSON (unPrefix "spotifyDevices")
-  toEncoding = genericToEncoding (unPrefix "spotifyDevices")
-
-data SpotifyDevice = SpotifyDevice
-  { spotifyDeviceId               :: String
-  , spotifyDeviceIsActive         :: Bool
-  , spotifyDeviceName             :: String
-  , spotifyDeviceIsPrivateSession :: Bool
-  , spotifyDeviceIsRestricted     :: Bool
-  , spotifyDeviceVolumePercent    :: Double
-  } deriving (Show, Generic)
-
-instance FromJSON SpotifyDevice where
-  parseJSON = genericParseJSON (unPrefix "spotifyDevice")
-
-instance ToJSON SpotifyDevice where
-  toJSON = genericToJSON (unPrefix "spotifyDevice")
-  toEncoding = genericToEncoding (unPrefix "spotifyDevice")
-
-unPrefix str = defaultOptions
-  { fieldLabelModifier = camelTo2 '_' . drop (length (str :: String))
-  }
-
-data SpotifyAlbumsResponse = SpotifyAlbumsResponse
-  { spotifyAlbumsResponseItems :: [SpotifyAlbumItem]
-  , spotifyAlbumsResponseNext  :: Maybe String
-  } deriving (Show, Generic)
-
-instance ToJSON SpotifyAlbumsResponse where
-  toJSON = genericToJSON $ unPrefix "spotifyAlbumsResponse"
-instance FromJSON SpotifyAlbumsResponse where
-  parseJSON = genericParseJSON $ unPrefix "spotifyAlbumsResponse"
-
-data SpotifyAlbumItem = SpotifyAlbumItem
-  { spotifyAlbumItemAlbum :: SpotifyAlbum
-  } deriving (Show, Generic)
-
-instance ToJSON SpotifyAlbumItem where
-  toJSON = genericToJSON $ unPrefix "spotifyAlbumItem"
-instance FromJSON SpotifyAlbumItem where
-  parseJSON = genericParseJSON $ unPrefix "spotifyAlbumItem"
-
-data SpotifyAlbum = SpotifyAlbum
-  { spotifyAlbumUri    :: String
-  , spotifyAlbumName   :: String
-  , spotifyAlbumTracks :: SpotifyTracks
-  } deriving (Show, Generic)
-
-instance ToJSON SpotifyAlbum where
-  toJSON = genericToJSON $ unPrefix "spotifyAlbum"
-instance FromJSON SpotifyAlbum where
-  parseJSON = genericParseJSON $ unPrefix "spotifyAlbum"
-
-data SpotifyTracks = SpotifyTracks { spotifyTracksItems :: [SpotifyTrack], spotifyTracksNext  :: Maybe String }
-  deriving (Show, Generic)
-
-instance ToJSON SpotifyTracks where
-  toJSON = genericToJSON $ unPrefix "spotifyTracks"
-instance FromJSON SpotifyTracks where
-  parseJSON = genericParseJSON $ unPrefix "spotifyTracks"
-
-data SpotifyTrack = SpotifyTrack { spotifyTrackUri :: String, spotifyTrackId :: String }
-  deriving (Show, Generic)
-
-instance ToJSON SpotifyTrack where
-  toJSON = genericToJSON $ unPrefix "spotifyTrack"
-instance FromJSON SpotifyTrack where
-  parseJSON = genericParseJSON $ unPrefix "spotifyTrack"
-
-data SpotifyAudioFeatures = SpotifyAudioFeatures { spotifyAudioFeaturesAudioFeatures :: [SpotifyAudioFeature] }
-  deriving (Show, Generic)
-
 averageFeature
   :: (SpotifyAudioFeature -> Double) -> SpotifyAudioFeatures -> Double
 averageFeature feature (SpotifyAudioFeatures features) = average
   $ map feature features
   where average xs = sum xs / List.genericLength xs
-
-instance ToJSON SpotifyAudioFeatures where
-  toJSON = genericToJSON $ unPrefix "spotifyAudioFeatures"
-instance FromJSON SpotifyAudioFeatures where
-  parseJSON = genericParseJSON $ unPrefix "spotifyAudioFeatures"
-
-data SpotifyAudioFeature = SpotifyAudioFeature
-  { spotifyAudioFeatureDanceability     :: Double
-  , spotifyAudioFeatureEnergy           :: Double
-  , spotifyAudioFeatureKey              :: Double
-  , spotifyAudioFeatureLoudness         :: Double
-  , spotifyAudioFeatureMode             :: Double
-  , spotifyAudioFeatureSpeechiness      :: Double
-  , spotifyAudioFeatureAcousticness     :: Double
-  , spotifyAudioFeatureInstrumentalness :: Double
-  , spotifyAudioFeatureLiveness         :: Double
-  , spotifyAudioFeatureValence          :: Double
-  , spotifyAudioFeatureTempo            :: Double
-  , spotifyAudioFeatureId               :: String
-  , spotifyAudioFeatureUri              :: String
-  }
-  deriving (Show, Generic)
-
-instance ToJSON SpotifyAudioFeature where
-  toJSON = genericToJSON $ unPrefix "spotifyAudioFeature"
-instance FromJSON SpotifyAudioFeature where
-  parseJSON = genericParseJSON $ unPrefix "spotifyAudioFeature"
 
 callSpotifyWith
   :: forall a
@@ -321,8 +214,10 @@ callSpotifyWith accessToken request f = do
   if getResponseStatusCode response < 300
     then do
       case fromJSON @a responseBodyValue of
-        Error   str -> error str
-        Success a   -> pure a
+        Error str -> do
+          print responseBodyValue
+          error str
+        Success a -> pure a
     else do
       print responseBodyValue
       error (show response)
@@ -366,22 +261,15 @@ getRandomizeForm accessToken = do
     "GET https://api.spotify.com/v1/me/player/devices"
     id
 
-  pure
-    $ (Blaze.form ! Blaze.action "/randomize" ! Blaze.method "POST")
-    $ do
-        (Blaze.label ! Blaze.for "device_id") "Choose a Device"
-        Blaze.select ! Blaze.id "device_id" ! Blaze.name "device_id" $ do
-          for_ spotifyDevicesDevices $ \SpotifyDevice {..} ->
-            let setSelected = if spotifyDeviceIsActive
-                  then (! Blaze.selected (fromString spotifyDeviceId))
-                  else id
-            in
-              (setSelected $ Blaze.option ! Blaze.value
-                  (fromString spotifyDeviceId)
-                )
-                (toHtml spotifyDeviceName)
-        -- (Blaze.input ! Blaze.type_ "radio") "Danceable"
-        -- (Blaze.label ! Blaze.for "danceability") "Danceable"
-        -- (Blaze.label ! Blaze.for "none") "none"
-
-        Blaze.button "Randomize Album"
+  pure $ (Blaze.form ! Blaze.action "/randomize" ! Blaze.method "POST") $ do
+    (Blaze.label ! Blaze.for "device_id") "Choose a Device"
+    Blaze.select ! Blaze.id "device_id" ! Blaze.name "device_id" $ do
+      for_ spotifyDevicesDevices $ \SpotifyDevice {..} ->
+        let setSelected = if spotifyDeviceIsActive
+              then (! Blaze.selected (fromString spotifyDeviceId))
+              else id
+        in
+          (setSelected $ Blaze.option ! Blaze.value (fromString spotifyDeviceId)
+            )
+            (toHtml spotifyDeviceName)
+    Blaze.button "Randomize Album"
