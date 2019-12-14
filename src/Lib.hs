@@ -84,7 +84,7 @@ appMain = do
                 [ "response_type=code"
                 , "&client_id=" <> S8.pack clientId
                 , "&scope=user-read-private user-read-email user-read-playback-state user-modify-playback-state user-library-read"
-                , "&redirect_uri=http://localhost:8888/callback"
+                , "&redirect_uri=" <> redirectUri
                 , "&state=" <> state
                 ]
       redirect url
