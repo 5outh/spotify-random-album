@@ -1,5 +1,6 @@
 {-# LANGUAGE DeriveGeneric       #-}
 {-# LANGUAGE OverloadedStrings   #-}
+{-# LANGUAGE RankNTypes          #-}
 {-# LANGUAGE RecordWildCards     #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications    #-}
@@ -19,6 +20,7 @@ import qualified Data.ByteString.Base64        as Base64
 import qualified Data.ByteString.Char8         as S8
 import qualified Data.ByteString.Lazy.Char8    as LBS
 import           Data.Foldable
+import qualified Data.List                     as List
 import           Data.String
 import qualified Data.Text                     as T
 import qualified Data.Text.Lazy                as TL
@@ -61,7 +63,9 @@ appMain = do
     Scotty.middleware sessionMiddleware
 
     Scotty.get "/" $ do
-      Scotty.html randomizeForm
+      Scotty.html $ Blaze.renderHtml $ do
+        Blaze.form ! Blaze.action "/login" $ do
+          Blaze.button "Login with Spotify"
 
     Scotty.get "/login" $ do
       state <- liftIO $ fmap S8.pack $ replicateM 16 $ randomRIO ('a', 'z')
@@ -125,16 +129,26 @@ appMain = do
       randomAlbum <- liftIO $ uniform albums
 
       let tracks =
-            map spotifyTrackUri
-              $ spotifyTracksItems
+            spotifyTracksItems
               . spotifyAlbumTracks
               . spotifyAlbumItemAlbum
               $ randomAlbum
+
+          uris = map spotifyTrackUri tracks
+          ids  = map spotifyTrackId tracks
+
+      albumAudioFeatures :: SpotifyAudioFeatures <-
+        liftIO
+        $ callSpotifyWith accessToken
+                          "GET https://api.spotify.com/v1/audio-features"
+        $ setRequestQueryString
+            [("ids", Just $ S8.pack $ List.intercalate "," ids)]
+
       liftIO
         $ callSpotifyWithNoResponse
             accessToken
             "PUT https://api.spotify.com/v1/me/player/play"
-        $ setRequestBodyJSON (object ["uris" Aeson..= tracks])
+        $ setRequestBodyJSON (object ["uris" Aeson..= uris])
         . setRequestQueryString [("device_id", Just deviceId)]
 
       deviceForm <- getDeviceForm accessToken
@@ -144,6 +158,23 @@ appMain = do
             (spotifyAlbumItemAlbum randomAlbum)
           )
         deviceForm
+
+        Blaze.h2 "Stats"
+        Blaze.p $ fromString $ "danceability: " <> formatAsPercentage
+          (averageFeature spotifyAudioFeatureDanceability albumAudioFeatures)
+        Blaze.p $ fromString $ "energy: " <> formatAsPercentage
+          (averageFeature spotifyAudioFeatureEnergy albumAudioFeatures)
+        Blaze.p $ fromString $ "speechiness: " <> formatAsPercentage
+          (averageFeature spotifyAudioFeatureSpeechiness albumAudioFeatures)
+        Blaze.p $ fromString $ "acousticness: " <> formatAsPercentage
+          (averageFeature spotifyAudioFeatureAcousticness albumAudioFeatures)
+        Blaze.p $ fromString $ "instrumentalness: " <> formatAsPercentage
+          (averageFeature spotifyAudioFeatureInstrumentalness albumAudioFeatures
+          )
+        Blaze.p $ fromString $ "liveness: " <> formatAsPercentage
+          (averageFeature spotifyAudioFeatureLiveness albumAudioFeatures)
+
+formatAsPercentage d = show (floor (d * 100)) <> "%"
 
 randomizeForm =
   "<form action=\"/randomize\"><button>Randomize Album</button><form>"
@@ -226,7 +257,7 @@ instance ToJSON SpotifyTracks where
 instance FromJSON SpotifyTracks where
   parseJSON = genericParseJSON $ unPrefix "spotifyTracks"
 
-data SpotifyTrack = SpotifyTrack { spotifyTrackUri :: String }
+data SpotifyTrack = SpotifyTrack { spotifyTrackUri :: String, spotifyTrackId :: String }
   deriving (Show, Generic)
 
 instance ToJSON SpotifyTrack where
@@ -234,104 +265,41 @@ instance ToJSON SpotifyTrack where
 instance FromJSON SpotifyTrack where
   parseJSON = genericParseJSON $ unPrefix "spotifyTrack"
 
--- {
-  -- "href" : "https://api.spotify.com/v1/me/albums?offset=0&limit=1",
-  -- "items" : [ {
-    -- "added_at" : "2015-11-26T19:13:31Z",
-    -- "album" : {
-      -- "album_type" : "album",
-      -- "artists" : [ {} ],
-      -- "id" : "5m4VYOPoIpkV0XgOiRKkWC",
-      -- "name" : "In & ut",
-      -- "tracks" : {
-        -- "href" : "https://api.spotify.com/v1/albums/5m4VYOPoIpkV0XgOiRKkWC/tracks?offset=0&limit=50",
-        -- "items" : [ {
-          -- "artists" : [ {
-            -- "external_urls" : {
-              -- "spotify" : "https://open.spotify.com/artist/58RMTlPJKbmpmVk1AmRK3h"
-            -- },
-            -- "href" : "https://api.spotify.com/v1/artists/58RMTlPJKbmpmVk1AmRK3h",
-            -- "id" : "58RMTlPJKbmpmVk1AmRK3h",
-            -- "name" : "Abidaz",
-            -- "type" : "artist",
-            -- "uri" : "spotify:artist:58RMTlPJKbmpmVk1AmRK3h"
-          -- }, {
-            -- "external_urls" : {
-              -- "spotify" : "https://open.spotify.com/artist/1l63szZeUpN1m87MOD1u7K"
-            -- },
-            -- "href" : "https://api.spotify.com/v1/artists/1l63szZeUpN1m87MOD1u7K",
-            -- "id" : "1l63szZeUpN1m87MOD1u7K",
-            -- "name" : "Chapee",
-            -- "type" : "artist",
-            -- "uri" : "spotify:artist:1l63szZeUpN1m87MOD1u7K"
-          -- }, {
-            -- "external_urls" : {
-              -- "spotify" : "https://open.spotify.com/artist/1VLf7Ncxb5Jga6eyd3jh6K"
-            -- },
-            -- "href" : "https://api.spotify.com/v1/artists/1VLf7Ncxb5Jga6eyd3jh6K",
-            -- "id" : "1VLf7Ncxb5Jga6eyd3jh6K",
-            -- "name" : "C.U.P",
-            -- "type" : "artist",
-            -- "uri" : "spotify:artist:1VLf7Ncxb5Jga6eyd3jh6K"
-          -- } ],
-          -- "available_markets" : [ "AR", "AT", "AU", "BE", "BR", "CL", "CO", "CY", "CZ", "DE" ],
-          -- "disc_number" : 1,
-          -- "duration_ms" : 170920,
-          -- "explicit" : false,
-          -- "external_urls" : {
-            -- "spotify" : "https://open.spotify.com/track/3VNWq8rTnQG6fM1eldSpZ0"
-          -- },
-          -- "href" : "https://api.spotify.com/v1/tracks/3VNWq8rTnQG6fM1eldSpZ0",
-          -- "id" : "3VNWq8rTnQG6fM1eldSpZ0",
-          -- "name" : "E.C.",
-          -- "preview_url" : "https://p.scdn.co/mp3-preview/f95e0dba1a76b44fa2b52da2bc273d4f1c4126a5",
-          -- "track_number" : 1,
-          -- "type" : "track",
-          -- "uri" : "spotify:track:3VNWq8rTnQG6fM1eldSpZ0"
-        -- }, {
-          -- ...
-        -- }, {
-          -- "artists" : [ {
-            -- "external_urls" : {
-              -- "spotify" : "https://open.spotify.com/artist/58RMTlPJKbmpmVk1AmRK3h"
-            -- },
-            -- "href" : "https://api.spotify.com/v1/artists/58RMTlPJKbmpmVk1AmRK3h",
-            -- "id" : "58RMTlPJKbmpmVk1AmRK3h",
-            -- "name" : "Abidaz",
-            -- "type" : "artist",
-            -- "uri" : "spotify:artist:58RMTlPJKbmpmVk1AmRK3h"
-          -- } ],
-          -- "available_markets" : [ "AR", "AT", "AU", "BE", "BR", "CL", "CO", "CY", "CZ", "DE", "DK", "EE" ],
-          -- "disc_number" : 1,
-          -- "duration_ms" : 165946,
-          -- "explicit" : false,
-          -- "external_urls" : {
-            -- "spotify" : "https://open.spotify.com/track/6ZrVKylVlxkaXHj42O0q2r"
-          -- },
-          -- "href" : "https://api.spotify.com/v1/tracks/6ZrVKylVlxkaXHj42O0q2r",
-          -- "id" : "6ZrVKylVlxkaXHj42O0q2r",
-          -- "name" : "Råknas - Radio Edit",
-          -- "preview_url" : "https://p.scdn.co/mp3-preview/a7c9a4bfa9e346e3733e9d88076ad1ae409136fb",
-          -- "track_number" : 13,
-          -- "type" : "track",
-          -- "uri" : "spotify:track:6ZrVKylVlxkaXHj42O0q2r"
-        -- } ],
-        -- "limit" : 50,
-        -- "next" : null,
-        -- "offset" : 0,
-        -- "previous" : null,
-        -- "total" : 13
-      -- },
-      -- "type" : "album",
-      -- "uri" : "spotify:album:5m4VYOPoIpkV0XgOiRKkWC"
-    -- }
-  -- } ],
-  -- "limit" : 1,
-  -- "next" : "https://api.spotify.com/v1/me/albums?offset=1&limit=1",
-  -- "offset" : 0,
-  -- "previous" : null,
-  -- "total" : 19
--- }
+data SpotifyAudioFeatures = SpotifyAudioFeatures { spotifyAudioFeaturesAudioFeatures :: [SpotifyAudioFeature] }
+  deriving (Show, Generic)
+
+averageFeature
+  :: (SpotifyAudioFeature -> Double) -> SpotifyAudioFeatures -> Double
+averageFeature feature (SpotifyAudioFeatures features) = average
+  $ map feature features
+  where average xs = sum xs / List.genericLength xs
+
+instance ToJSON SpotifyAudioFeatures where
+  toJSON = genericToJSON $ unPrefix "spotifyAudioFeatures"
+instance FromJSON SpotifyAudioFeatures where
+  parseJSON = genericParseJSON $ unPrefix "spotifyAudioFeatures"
+
+data SpotifyAudioFeature = SpotifyAudioFeature
+  { spotifyAudioFeatureDanceability     :: Double
+  , spotifyAudioFeatureEnergy           :: Double
+  , spotifyAudioFeatureKey              :: Double
+  , spotifyAudioFeatureLoudness         :: Double
+  , spotifyAudioFeatureMode             :: Double
+  , spotifyAudioFeatureSpeechiness      :: Double
+  , spotifyAudioFeatureAcousticness     :: Double
+  , spotifyAudioFeatureInstrumentalness :: Double
+  , spotifyAudioFeatureLiveness         :: Double
+  , spotifyAudioFeatureValence          :: Double
+  , spotifyAudioFeatureTempo            :: Double
+  , spotifyAudioFeatureId               :: String
+  , spotifyAudioFeatureUri              :: String
+  }
+  deriving (Show, Generic)
+
+instance ToJSON SpotifyAudioFeature where
+  toJSON = genericToJSON $ unPrefix "spotifyAudioFeature"
+instance FromJSON SpotifyAudioFeature where
+  parseJSON = genericParseJSON $ unPrefix "spotifyAudioFeature"
 
 callSpotifyWith
   :: forall a
@@ -350,7 +318,15 @@ callSpotifyWith accessToken request f = do
           $ f request0
 
   response <- httpJSON request
-  pure $ getResponseBody @a response
+  let responseBodyValue = getResponseBody @Value response
+  if getResponseStatusCode response < 300
+    then do
+      case fromJSON @a responseBodyValue of
+        Error   str -> error str
+        Success a   -> pure a
+    else do
+      print responseBodyValue
+      error (show response)
 
 callSpotifyWithNoResponse :: T.Text -> String -> (Request -> Request) -> IO ()
 callSpotifyWithNoResponse accessToken request f = do
@@ -368,7 +344,10 @@ callSpotifyWithNoResponse accessToken request f = do
     else do
       response1 <- httpJSON request
       print (getResponseBody response1 :: Value)
-      error (show response1)
+      error
+        ("callSpotifyWithNoResponse Failure: " <> show response1 <> "\n" <> show
+          (getResponseBody response1)
+        )
 
 sessionInsert session0 key val = do
   request0 <- request
