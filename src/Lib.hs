@@ -13,25 +13,32 @@ import           Control.Monad
 import           Control.Monad.IO.Class
 import           Control.Monad.Random
 import           Data.Aeson
-import qualified Data.Aeson                 as Aeson
+import qualified Data.Aeson                    as Aeson
 import           Data.Aeson.Lens
-import qualified Data.ByteString.Base64     as Base64
-import qualified Data.ByteString.Char8      as S8
-import qualified Data.ByteString.Lazy.Char8 as LBS
-import qualified Data.Text                  as T
-import qualified Data.Text.Lazy             as TL
-import           Data.Vault.Lazy            as Vault
+import qualified Data.ByteString.Base64        as Base64
+import qualified Data.ByteString.Char8         as S8
+import qualified Data.ByteString.Lazy.Char8    as LBS
+import           Data.Foldable
+import           Data.String
+import qualified Data.Text                     as T
+import qualified Data.Text.Lazy                as TL
+import           Data.Traversable
+import           Data.Vault.Lazy               as Vault
 import           GHC.Generics
 import           Network.HTTP.Simple
 import           Network.HTTP.Types
-import           Network.Wai                (vault)
+import           Network.Wai                   (vault)
 import           Network.Wai.Session
 import           Network.Wai.Session.Map
 import           System.Environment
 import           System.Random
-import           Web.Cookie                 (defaultSetCookie)
+import qualified Text.Blaze.Html.Renderer.Text as Blaze
+import           Text.Blaze.Html5              (toHtml, (!))
+import qualified Text.Blaze.Html5              as Blaze
+import qualified Text.Blaze.Html5.Attributes   as Blaze hiding (form, label)
+import           Web.Cookie                    (defaultSetCookie)
 import           Web.Scotty
-import qualified Web.Scotty                 as Scotty
+import qualified Web.Scotty                    as Scotty
 
 stateKey = "spotify_auth_state"
 accessTokenKey = "access_token"
@@ -98,7 +105,6 @@ appMain = do
 
       tokenResponse <- httpJSON request
 
-      -- TODO: Store tokens somewhere?
       let
         tokenResponseValue = getResponseBody @Value tokenResponse
         Just accessToken   = tokenResponseValue ^? key "access_token" . _String
@@ -107,14 +113,26 @@ appMain = do
       sessionInsert session accessTokenKey  (S8.pack $ T.unpack accessToken)
       sessionInsert session refreshTokenKey (S8.pack $ T.unpack refreshToken)
 
-      Scotty.html randomizeForm
+      SpotifyDevices {..} <- liftIO $ callSpotifyWith
+        accessToken
+        "GET https://api.spotify.com/v1/me/player/devices"
+        id
 
-      -- res <- liftIO $ callSpotifyWith accessToken "GET https://api.spotify.com/v1/me" id
-      -- TODO: Choose a Device?
-      -- res :: SpotifyDevices <- liftIO
-        -- $ callSpotifyWith accessToken "GET https://api.spotify.com/v1/me/player/devices" id
+      let
+        deviceForm =
+          (Blaze.form ! Blaze.action "/randomize" ! Blaze.method "POST") $ do
+            (Blaze.label ! Blaze.for "device_id") "Choose a Device"
+            Blaze.select ! Blaze.id "device_id" ! Blaze.name "device_id" $ do
+              for_ spotifyDevicesDevices
+                $ \SpotifyDevice {..} ->
+                    (Blaze.option ! Blaze.value (fromString spotifyDeviceId))
+                      (toHtml spotifyDeviceName)
+            Blaze.button "Randomize Album"
 
-    Scotty.get "/randomize" $ do
+      Scotty.html $ Blaze.renderHtml deviceForm
+
+    Scotty.post "/randomize" $ do
+      deviceId           <- param @S8.ByteString "device_id"
       Just accessTokenBS <- sessionLookup session accessTokenKey
       let accessToken = T.pack $ S8.unpack accessTokenBS
 
@@ -132,6 +150,7 @@ appMain = do
             accessToken
             "PUT https://api.spotify.com/v1/me/player/play"
         $ setRequestBodyJSON (object ["uris" Aeson..= tracks])
+        . setRequestQueryString [("device_id", Just deviceId)]
 
       Scotty.html $ TL.unlines
         [ "<h1>Playing album: "
@@ -159,7 +178,6 @@ data SpotifyDevices = SpotifyDevices
 
 instance FromJSON SpotifyDevices where
   parseJSON = genericParseJSON (unPrefix "spotifyDevices")
-
 instance ToJSON SpotifyDevices where
   toJSON = genericToJSON (unPrefix "spotifyDevices")
   toEncoding = genericToEncoding (unPrefix "spotifyDevices")
