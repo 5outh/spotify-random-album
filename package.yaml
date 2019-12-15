@@ -38,6 +38,8 @@ library:
     - cookie
     - wai
     - blaze-html
+    - containers
+    - raw-strings-qq
 
 executables:
   spotify-random-album:

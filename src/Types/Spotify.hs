@@ -1,7 +1,8 @@
 module Types.Spotify where
 
 import           Data.Aeson
-import qualified Data.Aeson   as Aeson
+import qualified Data.Aeson      as Aeson
+import           Data.Map.Strict (Map)
 import           GHC.Generics
 
 data SpotifyDevices = SpotifyDevices
@@ -50,11 +51,15 @@ instance FromJSON SpotifyAlbumItem where
   parseJSON = genericParseJSON $ unPrefix "spotifyAlbumItem"
 
 data SpotifyAlbum = SpotifyAlbum
-  { spotifyAlbumUri     :: String
-  , spotifyAlbumName    :: String
-  , spotifyAlbumTracks  :: SpotifyTracks
-  , spotifyAlbumImages  :: [SpotifyImage]
-  , spotifyAlbumArtists :: [SpotifyArtistSimple]
+  { spotifyAlbumUri          :: String
+  , spotifyAlbumHref         :: String
+  , spotifyAlbumExternalUrls :: Map String String
+  , spotifyAlbumReleaseDate  :: String
+  , spotifyAlbumGenres       :: [String]
+  , spotifyAlbumName         :: String
+  , spotifyAlbumTracks       :: SpotifyTracks
+  , spotifyAlbumImages       :: [SpotifyImage]
+  , spotifyAlbumArtists      :: [SpotifyArtistSimple]
   } deriving (Show, Generic)
 
 instance ToJSON SpotifyAlbum where

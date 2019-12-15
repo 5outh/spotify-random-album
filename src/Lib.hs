@@ -19,6 +19,7 @@ import qualified Data.ByteString.Char8         as S8
 import qualified Data.ByteString.Lazy.Char8    as LBS
 import           Data.Foldable
 import qualified Data.List                     as List
+import qualified Data.Map.Strict               as Map
 import           Data.String
 import qualified Data.Text                     as T
 import qualified Data.Text.Lazy                as TL
@@ -35,11 +36,15 @@ import           System.Random
 import qualified Text.Blaze.Html.Renderer.Text as Blaze
 import           Text.Blaze.Html5              (style, toHtml, (!))
 import qualified Text.Blaze.Html5              as Blaze hiding (style)
-import qualified Text.Blaze.Html5.Attributes   as Blaze hiding (form, label)
+import qualified Text.Blaze.Html5.Attributes   as Blaze hiding (form, label,
+                                                         span)
 import           Types.Spotify
 import           Web.Cookie                    (defaultSetCookie)
 import           Web.Scotty
 import qualified Web.Scotty                    as Scotty
+
+import           Html.Header
+import           Html.RandomizeForm
 
 -- Session keys
 stateKey = "spotify_auth_state"
@@ -116,8 +121,8 @@ appMain = do
       sessionInsert session accessTokenKey  (S8.pack $ T.unpack accessToken)
       sessionInsert session refreshTokenKey (S8.pack $ T.unpack refreshToken)
 
-      randomizeForm <- getRandomizeForm accessToken
-      Scotty.html $ Blaze.renderHtml randomizeForm
+      devices <- getDevices accessToken
+      Scotty.html $ Blaze.renderHtml (randomizeForm devices)
 
     Scotty.get "/randomize" $ do
       deviceId       <- param @S8.ByteString "device_id"
@@ -129,14 +134,17 @@ appMain = do
           albums      <- liftIO $ getMyAlbums accessToken
           randomAlbum <- liftIO $ uniform albums
 
-          let tracks =
-                spotifyTracksItems
-                  . spotifyAlbumTracks
-                  . spotifyAlbumItemAlbum
-                  $ randomAlbum
-
-              uris = map spotifyTrackUri tracks
-              ids  = map spotifyTrackId tracks
+          let
+            tracks =
+              spotifyTracksItems
+                . spotifyAlbumTracks
+                . spotifyAlbumItemAlbum
+                $ randomAlbum
+            album       = spotifyAlbumItemAlbum randomAlbum
+            mSpotifyUrl = Map.lookup "spotify" (spotifyAlbumExternalUrls album)
+            uris        = map spotifyTrackUri tracks
+            ids         = map spotifyTrackId tracks
+          liftIO $ print $ spotifyAlbumGenres album
 
           albumAudioFeatures :: SpotifyAudioFeatures <-
             liftIO
@@ -152,48 +160,40 @@ appMain = do
             $ setRequestBodyJSON (object ["uris" Aeson..= uris])
             . setRequestQueryString [("device_id", Just deviceId)]
 
-          randomizeForm <- getRandomizeForm accessToken
-          -- nb unsafe
-          let imageUrl =
-                case spotifyAlbumImages (spotifyAlbumItemAlbum randomAlbum) of
-                  []                      -> "#"
-                  (SpotifyImage {..} : _) -> spotifyImageUrl
+          devices <- getDevices accessToken
 
+          let imageUrl = case spotifyAlbumImages album of
+                []                      -> "#"
+                (SpotifyImage {..} : _) -> spotifyImageUrl
+              albumTitle = case mSpotifyUrl of
+                Nothing -> Blaze.a
+                Just spotifyUrl ->
+                  (Blaze.a ! Blaze.href (fromString spotifyUrl) ! Blaze.target
+                    "_blank"
+                  )
 
           Scotty.html $ Blaze.renderHtml $ do
+            Html.Header.header
             Blaze.div ! Blaze.style "margin-left:auto; margin-right:auto" $ do
-              Blaze.h1
-                ( fromString
-                $ spotifyAlbumName (spotifyAlbumItemAlbum randomAlbum)
-                )
+              Blaze.h1 $ do
+                albumTitle (fromString $ spotifyAlbumName album)
+                Blaze.preEscapedToMarkup ("&nbsp;" :: String)
+                Blaze.span
+                  (fromString $ "(" <> spotifyAlbumReleaseDate album <> ")")
 
               Blaze.h2
                 ( fromString
                 $ List.intercalate ", "
                 $ map spotifyArtistSimpleName
-                $ spotifyAlbumArtists (spotifyAlbumItemAlbum randomAlbum)
+                $ spotifyAlbumArtists album
                 )
-              randomizeForm
+
+              Blaze.h2
+                (fromString $ List.intercalate ", " $ spotifyAlbumGenres album)
 
               Blaze.img ! Blaze.src (fromString imageUrl) ! Blaze.width "400px"
 
-              -- Blaze.h2 "Stats"
-              -- renderFeature albumAudioFeatures
-                            -- "danceability"
-                            -- spotifyAudioFeatureDanceability
-              -- renderFeature albumAudioFeatures "energy" spotifyAudioFeatureEnergy
-              -- renderFeature albumAudioFeatures
-                            -- "speechiness"
-                            -- spotifyAudioFeatureSpeechiness
-              -- renderFeature albumAudioFeatures
-                            -- "acousticness"
-                            -- spotifyAudioFeatureAcousticness
-              -- renderFeature albumAudioFeatures
-                            -- "instrumentalness"
-                            -- spotifyAudioFeatureInstrumentalness
-              -- renderFeature albumAudioFeatures
-                            -- "liveness"
-                            -- spotifyAudioFeatureLiveness
+              randomizeForm devices
 
 renderFeature albumAudioFeatures name feature =
   Blaze.p $ fromString $ (name <> ": ") <> formatAsPercentage
@@ -279,20 +279,7 @@ sessionLookup session0 key = do
     Nothing                  -> pure Nothing
     Just (sessionLookup0, _) -> sessionLookup0 key
 
-getRandomizeForm accessToken = do
-  SpotifyDevices {..} <- liftIO $ callSpotifyWith
-    accessToken
-    "GET https://api.spotify.com/v1/me/player/devices"
-    id
-
-  pure $ (Blaze.form ! Blaze.action "/randomize") $ do
-    Blaze.select ! Blaze.id "device_id" ! Blaze.name "device_id" $ do
-      for_ spotifyDevicesDevices $ \SpotifyDevice {..} ->
-        let setSelected = if spotifyDeviceIsActive
-              then (! Blaze.selected (fromString spotifyDeviceId))
-              else id
-        in
-          (setSelected $ Blaze.option ! Blaze.value (fromString spotifyDeviceId)
-            )
-            (toHtml spotifyDeviceName)
-    Blaze.button "Randomize Album"
+getDevices accessToken = liftIO $ callSpotifyWith
+  accessToken
+  "GET https://api.spotify.com/v1/me/player/devices"
+  id
