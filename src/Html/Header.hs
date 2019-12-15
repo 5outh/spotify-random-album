@@ -11,6 +11,7 @@ import qualified Text.Blaze.Html5.Attributes as A
 import           Text.RawString.QQ
 
 header = head $ do
+  title "Spotify Randomizer"
   link
     ! A.href "https://fonts.googleapis.com/css?family=Montserrat&display=swap"
     ! A.rel "stylesheet"
@@ -24,11 +25,9 @@ black = "#191414"
 appStyle = [r|
 body {
   font-family: 'Montserrat', sans-serif;
-  max-width: 400px;
 }
 
 h3 {
-  line-height: 0.25em;
   color: #191414;
   text-align: center;
 }
@@ -44,7 +43,7 @@ a {
 
 .randomize-button {
   display: block;
-  width: 100%;
+  width: 440px;
   border: 3px solid #FFFFFF;
   color: #FFFFFF;
   background-color: #191414;
@@ -52,5 +51,22 @@ a {
   font-size: 20px;
   cursor: pointer;
   text-align: center;
+}
+
+.container {
+  text-align: center;
+  width: 100%;
+}
+
+.content {
+  display: inline-block;
+  max-width:600px;
+}
+
+.spotify-login-button {
+  background: #191414;
+  margin: 14px;
+  padding: 6px;
+  border: 10px solid #FFFFFF;
 }
 |]

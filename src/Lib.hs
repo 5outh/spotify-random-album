@@ -45,6 +45,7 @@ import qualified Web.Scotty                    as Scotty
 
 import           Html.Header
 import qualified Html.Header                   as Header
+import           Html.Layout
 import           Html.RandomizeForm
 
 -- Session keys
@@ -70,9 +71,12 @@ appMain = do
     Scotty.middleware sessionMiddleware
 
     Scotty.get "/" $ do
-      Scotty.html $ Blaze.renderHtml $ do
-        Blaze.form ! Blaze.action "/login" $ do
-          Blaze.button "Login with Spotify"
+      renderPage $ do
+        Blaze.h1 "Spotify Randomizer"
+        Blaze.h3 "Play a random album from your Spotify collection"
+        Blaze.a ! Blaze.class_ "spotify-login-button" ! Blaze.href "/login" $ do
+          Blaze.i ! Blaze.class_ "fab fa-spotify" $ Blaze.text ""
+          Blaze.text " Login with Spotify"
 
     Scotty.get "/login" $ do
       state <- liftIO $ fmap S8.pack $ replicateM 16 $ randomRIO ('a', 'z')
@@ -121,12 +125,24 @@ appMain = do
 
       sessionInsert session accessTokenKey  (S8.pack $ T.unpack accessToken)
       sessionInsert session refreshTokenKey (S8.pack $ T.unpack refreshToken)
+      redirect "/choose"
 
-      devices <- getDevices accessToken
-      Scotty.html $
-        Blaze.renderHtml $ do
-          Header.header
-          randomizeForm devices
+    Scotty.get "/choose" $ do
+
+      mAccessTokenBS <- sessionLookup session accessTokenKey
+      let mAccessToken = fmap (T.pack . S8.unpack) mAccessTokenBS
+      case mAccessToken of
+        Nothing          -> redirect "/login"
+        Just accessToken -> do
+          devices@SpotifyDevices {..} <- getDevices accessToken
+          case spotifyDevicesDevices of
+            [] -> renderPage $ do
+              Blaze.p $ mconcat
+                [ "No Spotify Devices Found."
+                , " Make sure that Spotify is active on at least one device and refresh this page"
+                , " (sometimes, you'll need to start playing a song to mark the device as active)."
+                ]
+            _ -> renderPage $ randomizeForm devices
 
     Scotty.get "/randomize" $ do
       deviceId       <- param @S8.ByteString "device_id"
@@ -148,7 +164,6 @@ appMain = do
             mSpotifyUrl = Map.lookup "spotify" (spotifyAlbumExternalUrls album)
             uris        = map spotifyTrackUri tracks
             ids         = map spotifyTrackId tracks
-          liftIO $ print $ spotifyAlbumGenres album
 
           albumAudioFeatures :: SpotifyAudioFeatures <-
             liftIO
@@ -176,8 +191,7 @@ appMain = do
                     "_blank"
                   )
 
-          Scotty.html $ Blaze.renderHtml $ do
-            Html.Header.header
+          renderPage $ do
             Blaze.div ! Blaze.style "margin-left:auto; margin-right:auto" $ do
               Blaze.h2 $ do
                 albumTitle (fromString $ spotifyAlbumName album)
@@ -196,7 +210,8 @@ appMain = do
               Blaze.h2
                 (fromString $ List.intercalate ", " $ spotifyAlbumGenres album)
 
-              Blaze.img ! Blaze.src (fromString imageUrl) ! Blaze.width "400px"
+              Blaze.img ! Blaze.src (fromString imageUrl) ! Blaze.style
+                "max-height:440px"
 
               randomizeForm devices
 
@@ -288,3 +303,5 @@ getDevices accessToken = liftIO $ callSpotifyWith
   accessToken
   "GET https://api.spotify.com/v1/me/player/devices"
   id
+
+renderPage = Scotty.html . Blaze.renderHtml . withLayout
