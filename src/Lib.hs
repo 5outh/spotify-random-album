@@ -175,18 +175,16 @@ appMain = do
           Scotty.html $ Blaze.renderHtml $ do
             Html.Header.header
             Blaze.div ! Blaze.style "margin-left:auto; margin-right:auto" $ do
-              Blaze.h1 $ do
+              Blaze.h2 $ do
                 albumTitle (fromString $ spotifyAlbumName album)
-                Blaze.preEscapedToMarkup ("&nbsp;" :: String)
-                Blaze.span
-                  (fromString $ "(" <> spotifyAlbumReleaseDate album <> ")")
 
-              Blaze.h2
+              Blaze.h3
                 ( fromString
                 $ List.intercalate ", "
                 $ map spotifyArtistSimpleName
                 $ spotifyAlbumArtists album
                 )
+              Blaze.h3 (fromString $ spotifyAlbumReleaseDate album)
 
               Blaze.h2
                 (fromString $ List.intercalate ", " $ spotifyAlbumGenres album)
