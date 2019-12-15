@@ -203,8 +203,10 @@ appMain = do
               Blaze.h2
                 (fromString $ List.intercalate ", " $ spotifyAlbumGenres album)
 
-              Blaze.img ! Blaze.src (fromString imageUrl) ! Blaze.style
-                "max-height:440px"
+              Blaze.img
+                ! Blaze.class_ "album-art"
+                ! Blaze.src (fromString imageUrl)
+                ! Blaze.style "max-height:440px"
 
               randomizeForm devices
 

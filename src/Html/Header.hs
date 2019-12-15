@@ -30,6 +30,7 @@ body {
 h3 {
   color: #191414;
   text-align: center;
+  line-height: 0.5em;
 }
 
 h2 {
@@ -79,5 +80,9 @@ footer {
   width: 100%;
   height: 2.5rem;            /* Footer height */
   text-align: center;
+}
+
+.album-art {
+  border: 5px solid #191414;
 }
 |]
