@@ -43,10 +43,9 @@ a {
 
 .randomize-button {
   display: block;
-  width: 440px;
+  width: 100%;
   border: 3px solid #FFFFFF;
-  color: #FFFFFF;
-  background-color: #191414;
+  color: #1DB954;
   padding: 14px 28px;
   font-size: 20px;
   cursor: pointer;
@@ -56,17 +55,29 @@ a {
 .container {
   text-align: center;
   width: 100%;
+  position: relative;
+  min-height: 100vh;
 }
 
 .content {
   display: inline-block;
   max-width:600px;
+  padding-bottom: 2.5rem;    /* Footer height */
 }
 
 .spotify-login-button {
-  background: #191414;
+  background: #FFFFFF;
   margin: 14px;
   padding: 6px;
   border: 10px solid #FFFFFF;
+  font-size: 24px;
+}
+
+footer {
+  position: absolute;
+  bottom: 0;
+  width: 100%;
+  height: 2.5rem;            /* Footer height */
+  text-align: center;
 }
 |]

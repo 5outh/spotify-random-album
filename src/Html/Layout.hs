@@ -20,7 +20,6 @@ withLayout :: Html -> Html
 withLayout content = do
   Html.Header.header
   div ! A.class_ "container" $ do
-    div ! A.class_ "content" $ do
-      content
-      footer $ do
-        (p ! A.style "font-size: 10px") "Made with ❤️ by Ben Kovach"
+    div ! A.class_ "content" $ content
+    footer $ do
+      (p ! A.style "font-size: 10px") "Made with ❤️ by Ben Kovach"

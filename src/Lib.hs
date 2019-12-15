@@ -165,13 +165,6 @@ appMain = do
             uris        = map spotifyTrackUri tracks
             ids         = map spotifyTrackId tracks
 
-          albumAudioFeatures :: SpotifyAudioFeatures <-
-            liftIO
-            $ callSpotifyWith accessToken
-                              "GET https://api.spotify.com/v1/audio-features"
-            $ setRequestQueryString
-                [("ids", Just $ S8.pack $ List.intercalate "," ids)]
-
           liftIO
             $ callSpotifyWithNoResponse
                 accessToken
