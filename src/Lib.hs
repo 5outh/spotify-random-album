@@ -44,6 +44,7 @@ import           Web.Scotty
 import qualified Web.Scotty                    as Scotty
 
 import           Html.Header
+import qualified Html.Header                   as Header
 import           Html.RandomizeForm
 
 -- Session keys
@@ -122,7 +123,10 @@ appMain = do
       sessionInsert session refreshTokenKey (S8.pack $ T.unpack refreshToken)
 
       devices <- getDevices accessToken
-      Scotty.html $ Blaze.renderHtml (randomizeForm devices)
+      Scotty.html $
+        Blaze.renderHtml $ do
+          Header.header
+          randomizeForm devices
 
     Scotty.get "/randomize" $ do
       deviceId       <- param @S8.ByteString "device_id"
@@ -177,6 +181,10 @@ appMain = do
             Blaze.div ! Blaze.style "margin-left:auto; margin-right:auto" $ do
               Blaze.h2 $ do
                 albumTitle (fromString $ spotifyAlbumName album)
+                fromString
+                  $  " ("
+                  <> (take 4 $ spotifyAlbumReleaseDate album)
+                  <> ")"
 
               Blaze.h3
                 ( fromString
@@ -184,7 +192,6 @@ appMain = do
                 $ map spotifyArtistSimpleName
                 $ spotifyAlbumArtists album
                 )
-              Blaze.h3 (fromString $ spotifyAlbumReleaseDate album)
 
               Blaze.h2
                 (fromString $ List.intercalate ", " $ spotifyAlbumGenres album)

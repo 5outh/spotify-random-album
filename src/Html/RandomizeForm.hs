@@ -15,6 +15,12 @@ import           Text.RawString.QQ
 import           Types.Spotify
 
 randomizeForm SpotifyDevices {..} = (form ! A.action "/randomize") $ do
+  let randomizeText = do
+        i ! A.class_ "fas fa-random" $ empty
+        toHtml (" Randomize" :: String)
+  button randomizeText ! A.class_ "randomize-button"
+
+  label ! A.for "device_id" $ fromString "Playing on "
   select ! A.id "device_id" ! A.name "device_id" $ do
     for_ spotifyDevicesDevices $ \SpotifyDevice {..} ->
       let setSelected = if spotifyDeviceIsActive
@@ -22,4 +28,5 @@ randomizeForm SpotifyDevices {..} = (form ! A.action "/randomize") $ do
             else P.id
       in  (setSelected $ option ! A.value (fromString spotifyDeviceId))
             (toHtml spotifyDeviceName)
-  button "Randomize Album"
+
+empty = toHtml ("" :: String)
