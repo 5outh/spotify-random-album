@@ -33,8 +33,8 @@ import           Network.Wai.Session.Map
 import           System.Environment
 import           System.Random
 import qualified Text.Blaze.Html.Renderer.Text as Blaze
-import           Text.Blaze.Html5              (toHtml, (!))
-import qualified Text.Blaze.Html5              as Blaze
+import           Text.Blaze.Html5              (style, toHtml, (!))
+import qualified Text.Blaze.Html5              as Blaze hiding (style)
 import qualified Text.Blaze.Html5.Attributes   as Blaze hiding (form, label)
 import           Types.Spotify
 import           Web.Cookie                    (defaultSetCookie)
@@ -153,30 +153,51 @@ appMain = do
             . setRequestQueryString [("device_id", Just deviceId)]
 
           randomizeForm <- getRandomizeForm accessToken
-          Scotty.html $ Blaze.renderHtml $ do
-            Blaze.h1
-              (fromString $ "Playing album: " <> spotifyAlbumName
-                (spotifyAlbumItemAlbum randomAlbum)
-              )
-            randomizeForm
+          -- nb unsafe
+          let imageUrl =
+                case spotifyAlbumImages (spotifyAlbumItemAlbum randomAlbum) of
+                  []                      -> "#"
+                  (SpotifyImage {..} : _) -> spotifyImageUrl
 
-            Blaze.h2 "Stats"
-            Blaze.p $ fromString $ "danceability: " <> formatAsPercentage
-              (averageFeature spotifyAudioFeatureDanceability albumAudioFeatures
-              )
-            Blaze.p $ fromString $ "energy: " <> formatAsPercentage
-              (averageFeature spotifyAudioFeatureEnergy albumAudioFeatures)
-            Blaze.p $ fromString $ "speechiness: " <> formatAsPercentage
-              (averageFeature spotifyAudioFeatureSpeechiness albumAudioFeatures)
-            Blaze.p $ fromString $ "acousticness: " <> formatAsPercentage
-              (averageFeature spotifyAudioFeatureAcousticness albumAudioFeatures
-              )
-            Blaze.p $ fromString $ "instrumentalness: " <> formatAsPercentage
-              (averageFeature spotifyAudioFeatureInstrumentalness
-                              albumAudioFeatures
-              )
-            Blaze.p $ fromString $ "liveness: " <> formatAsPercentage
-              (averageFeature spotifyAudioFeatureLiveness albumAudioFeatures)
+
+          Scotty.html $ Blaze.renderHtml $ do
+            Blaze.div ! Blaze.style "margin-left:auto; margin-right:auto" $ do
+              Blaze.h1
+                ( fromString
+                $ spotifyAlbumName (spotifyAlbumItemAlbum randomAlbum)
+                )
+
+              Blaze.h2
+                ( fromString
+                $ List.intercalate ", "
+                $ map spotifyArtistSimpleName
+                $ spotifyAlbumArtists (spotifyAlbumItemAlbum randomAlbum)
+                )
+              randomizeForm
+
+              Blaze.img ! Blaze.src (fromString imageUrl) ! Blaze.width "400px"
+
+              -- Blaze.h2 "Stats"
+              -- renderFeature albumAudioFeatures
+                            -- "danceability"
+                            -- spotifyAudioFeatureDanceability
+              -- renderFeature albumAudioFeatures "energy" spotifyAudioFeatureEnergy
+              -- renderFeature albumAudioFeatures
+                            -- "speechiness"
+                            -- spotifyAudioFeatureSpeechiness
+              -- renderFeature albumAudioFeatures
+                            -- "acousticness"
+                            -- spotifyAudioFeatureAcousticness
+              -- renderFeature albumAudioFeatures
+                            -- "instrumentalness"
+                            -- spotifyAudioFeatureInstrumentalness
+              -- renderFeature albumAudioFeatures
+                            -- "liveness"
+                            -- spotifyAudioFeatureLiveness
+
+renderFeature albumAudioFeatures name feature =
+  Blaze.p $ fromString $ (name <> ": ") <> formatAsPercentage
+    (averageFeature feature albumAudioFeatures)
 
 formatAsPercentage d = show (floor (d * 100)) <> "%"
 
@@ -186,9 +207,7 @@ getMyAlbums accessToken = go [] "https://api.spotify.com/v1/me/albums?limit=50"
     SpotifyAlbumsResponse {..} <- callSpotifyWith accessToken ("GET " <> url) id
     case spotifyAlbumsResponseNext of
       Nothing   -> pure (spotifyAlbumsResponseItems ++ albums)
-      Just next -> do
-        print next
-        (spotifyAlbumsResponseItems ++) <$> go albums next
+      Just next -> (spotifyAlbumsResponseItems ++) <$> go albums next
 
 averageFeature
   :: (SpotifyAudioFeature -> Double) -> SpotifyAudioFeatures -> Double
@@ -267,7 +286,6 @@ getRandomizeForm accessToken = do
     id
 
   pure $ (Blaze.form ! Blaze.action "/randomize") $ do
-    (Blaze.label ! Blaze.for "device_id") "Choose a Device"
     Blaze.select ! Blaze.id "device_id" ! Blaze.name "device_id" $ do
       for_ spotifyDevicesDevices $ \SpotifyDevice {..} ->
         let setSelected = if spotifyDeviceIsActive
