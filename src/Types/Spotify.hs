@@ -50,10 +50,10 @@ instance FromJSON SpotifyAlbumItem where
   parseJSON = genericParseJSON $ unPrefix "spotifyAlbumItem"
 
 data SpotifyAlbum = SpotifyAlbum
-  { spotifyAlbumUri    :: String
-  , spotifyAlbumName   :: String
-  , spotifyAlbumTracks :: SpotifyTracks
-  , spotifyAlbumImages :: [SpotifyImage]
+  { spotifyAlbumUri     :: String
+  , spotifyAlbumName    :: String
+  , spotifyAlbumTracks  :: SpotifyTracks
+  , spotifyAlbumImages  :: [SpotifyImage]
   , spotifyAlbumArtists :: [SpotifyArtistSimple]
   } deriving (Show, Generic)
 

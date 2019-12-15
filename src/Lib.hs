@@ -95,8 +95,6 @@ appMain = do
       state <- param "state"
       mStoredState :: Maybe S8.ByteString <- sessionLookup session stateKey
       when (Just state /= mStoredState) $ error "mismatched state"
-      -- TODO session clear
-      -- sessionInsert stateKey Nothing
 
       request0 <- parseRequest "POST https://accounts.spotify.com/api/token"
 
@@ -121,59 +119,64 @@ appMain = do
       randomizeForm <- getRandomizeForm accessToken
       Scotty.html $ Blaze.renderHtml randomizeForm
 
-    Scotty.post "/randomize" $ do
-      deviceId           <- param @S8.ByteString "device_id"
-      Just accessTokenBS <- sessionLookup session accessTokenKey
-      let accessToken = T.pack $ S8.unpack accessTokenBS
+    Scotty.get "/randomize" $ do
+      deviceId       <- param @S8.ByteString "device_id"
+      mAccessTokenBS <- sessionLookup session accessTokenKey
+      let mAccessToken = fmap (T.pack . S8.unpack) mAccessTokenBS
+      case mAccessToken of
+        Nothing          -> redirect "/login"
+        Just accessToken -> do
+          albums      <- liftIO $ getMyAlbums accessToken
+          randomAlbum <- liftIO $ uniform albums
 
-      albums      <- liftIO $ getMyAlbums accessToken
-      randomAlbum <- liftIO $ uniform albums
+          let tracks =
+                spotifyTracksItems
+                  . spotifyAlbumTracks
+                  . spotifyAlbumItemAlbum
+                  $ randomAlbum
 
-      let tracks =
-            spotifyTracksItems
-              . spotifyAlbumTracks
-              . spotifyAlbumItemAlbum
-              $ randomAlbum
+              uris = map spotifyTrackUri tracks
+              ids  = map spotifyTrackId tracks
 
-          uris = map spotifyTrackUri tracks
-          ids  = map spotifyTrackId tracks
+          albumAudioFeatures :: SpotifyAudioFeatures <-
+            liftIO
+            $ callSpotifyWith accessToken
+                              "GET https://api.spotify.com/v1/audio-features"
+            $ setRequestQueryString
+                [("ids", Just $ S8.pack $ List.intercalate "," ids)]
 
-      albumAudioFeatures :: SpotifyAudioFeatures <-
-        liftIO
-        $ callSpotifyWith accessToken
-                          "GET https://api.spotify.com/v1/audio-features"
-        $ setRequestQueryString
-            [("ids", Just $ S8.pack $ List.intercalate "," ids)]
+          liftIO
+            $ callSpotifyWithNoResponse
+                accessToken
+                "PUT https://api.spotify.com/v1/me/player/play"
+            $ setRequestBodyJSON (object ["uris" Aeson..= uris])
+            . setRequestQueryString [("device_id", Just deviceId)]
 
-      liftIO
-        $ callSpotifyWithNoResponse
-            accessToken
-            "PUT https://api.spotify.com/v1/me/player/play"
-        $ setRequestBodyJSON (object ["uris" Aeson..= uris])
-        . setRequestQueryString [("device_id", Just deviceId)]
+          randomizeForm <- getRandomizeForm accessToken
+          Scotty.html $ Blaze.renderHtml $ do
+            Blaze.h1
+              (fromString $ "Playing album: " <> spotifyAlbumName
+                (spotifyAlbumItemAlbum randomAlbum)
+              )
+            randomizeForm
 
-      randomizeForm <- getRandomizeForm accessToken
-      Scotty.html $ Blaze.renderHtml $ do
-        Blaze.h1
-          (fromString $ "Playing album: " <> spotifyAlbumName
-            (spotifyAlbumItemAlbum randomAlbum)
-          )
-        randomizeForm
-
-        Blaze.h2 "Stats"
-        Blaze.p $ fromString $ "danceability: " <> formatAsPercentage
-          (averageFeature spotifyAudioFeatureDanceability albumAudioFeatures)
-        Blaze.p $ fromString $ "energy: " <> formatAsPercentage
-          (averageFeature spotifyAudioFeatureEnergy albumAudioFeatures)
-        Blaze.p $ fromString $ "speechiness: " <> formatAsPercentage
-          (averageFeature spotifyAudioFeatureSpeechiness albumAudioFeatures)
-        Blaze.p $ fromString $ "acousticness: " <> formatAsPercentage
-          (averageFeature spotifyAudioFeatureAcousticness albumAudioFeatures)
-        Blaze.p $ fromString $ "instrumentalness: " <> formatAsPercentage
-          (averageFeature spotifyAudioFeatureInstrumentalness albumAudioFeatures
-          )
-        Blaze.p $ fromString $ "liveness: " <> formatAsPercentage
-          (averageFeature spotifyAudioFeatureLiveness albumAudioFeatures)
+            Blaze.h2 "Stats"
+            Blaze.p $ fromString $ "danceability: " <> formatAsPercentage
+              (averageFeature spotifyAudioFeatureDanceability albumAudioFeatures
+              )
+            Blaze.p $ fromString $ "energy: " <> formatAsPercentage
+              (averageFeature spotifyAudioFeatureEnergy albumAudioFeatures)
+            Blaze.p $ fromString $ "speechiness: " <> formatAsPercentage
+              (averageFeature spotifyAudioFeatureSpeechiness albumAudioFeatures)
+            Blaze.p $ fromString $ "acousticness: " <> formatAsPercentage
+              (averageFeature spotifyAudioFeatureAcousticness albumAudioFeatures
+              )
+            Blaze.p $ fromString $ "instrumentalness: " <> formatAsPercentage
+              (averageFeature spotifyAudioFeatureInstrumentalness
+                              albumAudioFeatures
+              )
+            Blaze.p $ fromString $ "liveness: " <> formatAsPercentage
+              (averageFeature spotifyAudioFeatureLiveness albumAudioFeatures)
 
 formatAsPercentage d = show (floor (d * 100)) <> "%"
 
@@ -245,15 +248,17 @@ callSpotifyWithNoResponse accessToken request f = do
 
 sessionInsert session0 key val = do
   request0 <- request
-  let Just (_sessionLookup, sessionInsert0) =
-        Vault.lookup session0 (vault request0)
-  sessionInsert0 key val
+  let mSessionAccess = Vault.lookup session0 (vault request0)
+  case mSessionAccess of
+    Nothing                  -> error "impossible: session is not available"
+    Just (_, sessionInsert0) -> sessionInsert0 key val
 
 sessionLookup session0 key = do
   request0 <- request
-  let Just (sessionLookup0, _sessionInsert) =
-        Vault.lookup session0 (vault request0)
-  sessionLookup0 key
+  let mSessionAccess = Vault.lookup session0 (vault request0)
+  case mSessionAccess of
+    Nothing                  -> pure Nothing
+    Just (sessionLookup0, _) -> sessionLookup0 key
 
 getRandomizeForm accessToken = do
   SpotifyDevices {..} <- liftIO $ callSpotifyWith
@@ -261,7 +266,7 @@ getRandomizeForm accessToken = do
     "GET https://api.spotify.com/v1/me/player/devices"
     id
 
-  pure $ (Blaze.form ! Blaze.action "/randomize" ! Blaze.method "POST") $ do
+  pure $ (Blaze.form ! Blaze.action "/randomize") $ do
     (Blaze.label ! Blaze.for "device_id") "Choose a Device"
     Blaze.select ! Blaze.id "device_id" ! Blaze.name "device_id" $ do
       for_ spotifyDevicesDevices $ \SpotifyDevice {..} ->
