@@ -53,6 +53,7 @@ stateKey = "spotify_auth_state"
 accessTokenKey = "access_token"
 refreshTokenKey = "refresh_token"
 sessionKey = "session"
+albumIdsKey = "album_ids"
 
 appMain :: IO ()
 appMain = do
@@ -151,19 +152,24 @@ appMain = do
       case mAccessToken of
         Nothing          -> redirect "/login"
         Just accessToken -> do
-          albums      <- liftIO $ getMyAlbums accessToken
-          randomAlbum <- liftIO $ uniform albums
+          album <- do
+            mAlbumIds <- sessionLookup session albumIdsKey
+            case mAlbumIds of
+              Just albumIdsStr -> liftIO $ do
+                let albumIds = read @[String] $ S8.unpack albumIdsStr
+                getAlbum accessToken =<< uniform albumIds
 
-          let
-            tracks =
-              spotifyTracksItems
-                . spotifyAlbumTracks
-                . spotifyAlbumItemAlbum
-                $ randomAlbum
-            album       = spotifyAlbumItemAlbum randomAlbum
-            mSpotifyUrl = Map.lookup "spotify" (spotifyAlbumExternalUrls album)
-            uris        = map spotifyTrackUri tracks
-            ids         = map spotifyTrackId tracks
+              Nothing -> do
+                albums <- liftIO $ getMyAlbums accessToken
+                let albumIds =
+                      map (spotifyAlbumId . spotifyAlbumItemAlbum) albums
+                sessionInsert session albumIdsKey (fromString $ show albumIds)
+                liftIO $ uniform (map spotifyAlbumItemAlbum albums)
+          let tracks = spotifyTracksItems . spotifyAlbumTracks $ album
+              mSpotifyUrl =
+                Map.lookup "spotify" (spotifyAlbumExternalUrls album)
+              uris = map spotifyTrackUri tracks
+              ids  = map spotifyTrackId tracks
 
           liftIO
             $ callSpotifyWithNoResponse
@@ -223,6 +229,9 @@ getMyAlbums accessToken = go [] "https://api.spotify.com/v1/me/albums?limit=50"
     case spotifyAlbumsResponseNext of
       Nothing   -> pure (spotifyAlbumsResponseItems ++ albums)
       Just next -> (spotifyAlbumsResponseItems ++) <$> go albums next
+
+getAlbum accessToken albumId = callSpotifyWith accessToken ("GET " <> url) id
+  where url = "https://api.spotify.com/v1/albums/" <> albumId
 
 averageFeature
   :: (SpotifyAudioFeature -> Double) -> SpotifyAudioFeatures -> Double

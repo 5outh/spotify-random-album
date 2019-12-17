@@ -53,6 +53,7 @@ instance FromJSON SpotifyAlbumItem where
 data SpotifyAlbum = SpotifyAlbum
   { spotifyAlbumUri          :: String
   , spotifyAlbumHref         :: String
+  , spotifyAlbumId           :: String
   , spotifyAlbumExternalUrls :: Map String String
   , spotifyAlbumReleaseDate  :: String
   , spotifyAlbumGenres       :: [String]
